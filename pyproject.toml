@@ -58,8 +58,8 @@ extra-standard-library = ["typing_extensions"]
 
 [tool.pyright]
 reportUnnecessaryTypeIgnoreComment = "error"
-
 pythonVersion = "3.10"
+
 [tool.coverage.run]
 source_pkgs = ["zyncio", "tests"]
 branch = true
