@@ -28,6 +28,15 @@ base_client.simple_zproperty  # pyright: ignore[reportAttributeAccessIssue]
 assert_type(sync_client.simple_zproperty, zyncio.Mode)
 assert_type(asyncio.run(async_client.simple_zproperty()), zyncio.Mode)
 
+base_client.settable_zproperty  # pyright: ignore[reportAttributeAccessIssue]
+assert_type(sync_client.settable_zproperty, int)
+sync_client.settable_zproperty = 1
+assert_type(asyncio.run(async_client.settable_zproperty()), int)
+asyncio.run(async_client.settable_zproperty.set(1))
+# This test needs to come last, since the assignment messes with the inferred
+# type of `async_client.settable_zproperty`.
+async_client.settable_zproperty = 1  # pyright: ignore[reportAttributeAccessIssue]
+
 base_client.class_method()  # pyright: ignore[reportCallIssue]
 assert_type(SyncClient.class_method(), type[SyncClient])
 assert_type(asyncio.run(AsyncClient.class_method()), type[AsyncClient])

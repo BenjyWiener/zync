@@ -214,15 +214,15 @@ class BoundZyncClassMethod(Generic[SelfT, P, ReturnT]):
 class zproperty(Generic[SelfT, ReturnT]):
     """Wrap a method to act as a property in sync mode, and as a coroutine in async mode."""
 
-    def __init__(self, func: ZyncableMethod[SelfT, [], ReturnT]) -> None:
+    def __init__(self, getter: ZyncableMethod[SelfT, [], ReturnT]) -> None:
         """..
 
-        :param func: The method to wrap.
+        :param getter: The getter for this property.
         """
-        self.func: Final[ZyncableMethod[SelfT, [], ReturnT]] = func
-        self.__name__: str = func.__name__
-        self.__qualname__: str = getattr(func, '__qualname__', func.__name__)
-        self.__doc__: str | None = getattr(func, '__doc__', None)
+        self.fget: Final[ZyncableMethod[SelfT, [], ReturnT]] = getter
+        self.__name__: str = getter.__name__
+        self.__qualname__: str = getattr(getter, '__qualname__', getter.__name__)
+        self.__doc__: str | None = getattr(getter, '__doc__', None)
 
     def __repr__(self) -> str:
         return f'<{self.__module__}.{type(self).__name__} {self.__qualname__}>'
@@ -230,14 +230,81 @@ class zproperty(Generic[SelfT, ReturnT]):
     @overload
     def __get__(self, instance: None, owner: type[SelfT]) -> Self: ...
     @overload
-    def __get__(self: 'zproperty[SyncSelfT, ReturnT]', instance: SelfT, owner: type[SelfT] | None) -> ReturnT: ...
+    def __get__(self: 'zproperty[SyncSelfT, ReturnT]', instance: SyncSelfT, owner: type[SyncSelfT] | None) -> ReturnT: ...
     @overload
-    def __get__(self: 'zproperty[AsyncSelfT, ReturnT]', instance: SelfT, owner: type[SelfT] | None) -> 'BoundZyncMethod[SelfT, [], ReturnT]': ...
+    def __get__(
+        self: 'zproperty[AsyncSelfT, ReturnT]', instance: AsyncSelfT, owner: type[AsyncSelfT] | None
+    ) -> 'BoundZyncMethod[SelfT, [], ReturnT]': ...
     def __get__(self, instance: SelfT | None, owner: type[SelfT] | None) -> 'Self | ReturnT | BoundZyncMethod[SelfT, [], ReturnT]':
         if instance is None:
             return self
         elif isinstance(instance, SyncMixin):
-            return BoundZyncMethod(self.func, instance).run_sync()
+            return BoundZyncMethod(self.fget, instance).run_sync()
         elif isinstance(instance, AsyncMixin):
-            return BoundZyncMethod(self.func, instance)
+            return BoundZyncMethod(self.fget, instance)
         raise TypeError(f'{type(self).__name__} can only be accessed on instances of SyncMixin or AsyncMixin')
+
+    def setter(self, setter: ZyncableMethod[SelfT, [ReturnT], None]) -> 'ZyncSettableProperty[SelfT, ReturnT]':
+        """Return a new `ZyncSettableProperty` with the given setter."""
+        return ZyncSettableProperty(self.fget, setter)
+
+
+class ZyncSettableProperty(zproperty[SelfT, ReturnT]):
+    def __init__(self, getter: ZyncableMethod[SelfT, [], ReturnT], setter: ZyncableMethod[SelfT, [ReturnT], None]) -> None:
+        """..
+
+        :param getter: The getter for this property.
+        :param setter: The setter for this property.
+        """
+        super().__init__(getter)
+        self.fset: Final[ZyncableMethod[SelfT, [ReturnT], None]] = setter
+
+    @overload
+    def __get__(self, instance: None, owner: type[SelfT]) -> Self: ...
+    @overload
+    def __get__(self: 'zproperty[SyncSelfT, ReturnT]', instance: SyncSelfT, owner: type[SyncSelfT] | None) -> ReturnT: ...
+    @overload
+    def __get__(
+        self: 'zproperty[AsyncSelfT, ReturnT]', instance: AsyncSelfT, owner: type[AsyncSelfT] | None
+    ) -> 'BoundZyncSettableProperty[SelfT, ReturnT]': ...
+    def __get__(self, instance: SelfT | None, owner: type[SelfT] | None) -> 'Self | ReturnT | BoundZyncSettableProperty[SelfT, ReturnT]':
+        if instance is None:
+            return self
+        elif isinstance(instance, SyncMixin):
+            return BoundZyncMethod(self.fget, instance).run_sync()
+        elif isinstance(instance, AsyncMixin):
+            return BoundZyncSettableProperty(self.fget, self.fset, instance)
+        raise TypeError(f'{type(self).__name__} can only be accessed on instances of SyncMixin or AsyncMixin')
+
+    def __set__(self: 'ZyncSettableProperty[SyncSelfT, ReturnT]', instance: SyncSelfT, value: ReturnT) -> None:
+        if not isinstance(instance, SyncMixin):
+            raise TypeError(f'{type(self).__name__}.__set__ can only be used on instances of SyncMixin')
+        return BoundZyncMethod(self.fset, instance).run_sync(value)
+
+
+class BoundZyncSettableProperty(BoundZyncMethod[SelfT, [], ReturnT]):
+    """A bound `zyncio.ZyncSettableProperty`.
+
+    This class provides the set functionality for `ZyncSettableProperty` when
+    accessed on an instance of `AsyncMixin`.
+    """
+
+    def __init__(
+        self,
+        getter: ZyncableMethod[SelfT, P, ReturnT],
+        setter: ZyncableMethod[SelfT, [ReturnT], None],
+        instance: SelfT,
+    ) -> None:
+        """..
+
+        :param func: The method to wrap.
+        :param instance: The instance to bind the method to.
+        """
+        super().__init__(getter, instance)
+        self.fset: Final[ZyncableMethod[SelfT, [ReturnT], None]] = setter
+
+    async def set(self: 'BoundZyncSettableProperty[AsyncSelfT, ReturnT]', value: ReturnT) -> None:
+        """Set the value of the property."""
+        if not isinstance(self.instance, AsyncMixin):  # pragma: no cover
+            raise TypeError(f'{type(self).__name__}.set can only be used on instances of AsyncMixin')
+        return await BoundZyncMethod(self.fset, self.instance).run_async(value)

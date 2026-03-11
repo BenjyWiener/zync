@@ -30,6 +30,28 @@ class BaseClient:
         """Return the zyncio mode."""
         return zync_mode
 
+    _settable_zproperty: int = 0
+
+    @zyncio.zproperty
+    async def _settable_zproperty_getter(self, zync_mode: zyncio.Mode) -> int:
+        """Return the zyncio mode."""
+        if zync_mode is zyncio.SYNC:
+            assert_no_running_loop()
+        else:
+            assert_running_loop()
+
+        return self._settable_zproperty
+
+    @_settable_zproperty_getter.setter
+    async def settable_zproperty(self, zync_mode: zyncio.Mode, value: int) -> None:
+        """Set the zyncio mode."""
+        if zync_mode is zyncio.SYNC:
+            assert_no_running_loop()
+        else:
+            assert_running_loop()
+
+        self._settable_zproperty = value
+
     @zyncio.zclassmethod
     @classmethod
     async def class_method(cls, zync_mode: zyncio.Mode) -> type[Self]:

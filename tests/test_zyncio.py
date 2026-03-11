@@ -116,6 +116,42 @@ def test_zproperty_get_from_class() -> None:
     assert isinstance(AsyncClient.simple_zproperty, zyncio.zproperty)
 
 
+def test_settable_zproperty_sync() -> None:
+    """Test `ZyncSettableProperty` on a sync client."""
+    client = SyncClient()
+    initial_value = client.settable_zproperty
+    new_value = initial_value + 1
+    client.settable_zproperty = new_value
+    assert client.settable_zproperty == new_value
+
+
+@pytest.mark.asyncio
+async def test_settable_zproperty_async() -> None:
+    """Test `ZyncSettableProperty` on an async client."""
+    client = AsyncClient()
+    initial_value = await client.settable_zproperty()
+    new_value = initial_value + 1
+    await client.settable_zproperty.set(new_value)
+    assert await client.settable_zproperty() == new_value
+
+    with pytest.raises(TypeError, match=r'Mixin'):
+        client.settable_zproperty = new_value  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_settable_zproperty_no_mixin() -> None:
+    """Test that accessing a `ZyncSettableProperty` raises if no mixin is used."""
+    client = BaseClient()
+    with pytest.raises(TypeError, match=r'Mixin'):
+        client.settable_zproperty  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_settable_zproperty_get_from_class() -> None:
+    """Test that accessing a `ZyncSettableProperty` from a class returns the unbound `ZyncSettableProperty` object."""
+    assert isinstance(BaseClient.settable_zproperty, zyncio.ZyncSettableProperty)
+    assert isinstance(SyncClient.settable_zproperty, zyncio.ZyncSettableProperty)
+    assert isinstance(AsyncClient.settable_zproperty, zyncio.ZyncSettableProperty)
+
+
 def test_zclassmethod_sync() -> None:
     """Test `zclassmethod` on a sync client."""
     assert SyncClient.class_method() is SyncClient

@@ -21,7 +21,7 @@ classifiers = [
 dependencies = ["typing_extensions~=4.0"]
 
 [project.optional-dependencies]
-dev = ["coverage", "pytest", "pytest-cov"]
+dev = ["coverage", "pytest", "pytest-asyncio", "pytest-cov"]
 
 [project.urls]
 Documentation = "https://github.com/BenjyWiener/zyncio#readme"
