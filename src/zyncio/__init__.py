@@ -146,9 +146,9 @@ class BoundZyncMethod(Generic[SelfT, P, ReturnT]):
     def __repr__(self) -> str:
         return f'<{self.__module__}.{type(self).__name__} {self.func.__qualname__} of {self.instance!r}>'
 
-    def run_zync(self, mode: Mode, *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT]:
+    def run_zync(self, zync_mode: Mode, /, *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT]:
         """Run the method in the given mode."""
-        return self.func(self.instance, mode, *args, **kwargs)
+        return self.func(self.instance, zync_mode, *args, **kwargs)
 
     def run_sync(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT:
         """Run the method in sync mode."""
@@ -186,9 +186,9 @@ class BoundZyncClassMethod(Generic[SelfT, P, ReturnT]):
     def __repr__(self) -> str:
         return f'<{self.__module__}.{type(self).__name__} {self.func.__qualname__} of {self.cls!r}>'
 
-    def run_zync(self, mode: Mode, *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT]:
+    def run_zync(self, zync_mode: Mode, /, *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT]:
         """Run the method in the given mode."""
-        return self.func(self.cls, mode, *args, **kwargs)
+        return self.func(self.cls, zync_mode, *args, **kwargs)
 
     def run_sync(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT:
         """Run the method in sync mode."""
