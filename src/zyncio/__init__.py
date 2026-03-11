@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Coroutine
 from enum import Enum
+from functools import partial
 from typing import Any, Concatenate, Final, Generic, ParamSpec, TypeVar, overload
 from typing_extensions import Self
 
@@ -158,6 +159,13 @@ class BoundZyncMethod(Generic[SelfT, P, ReturnT]):
         """Run the method in async mode."""
         return await self.func(self.instance, ASYNC, *args, **kwargs)
 
+    def __getitem__(self, zync_mode: Mode) -> Callable[P, Coroutine[Any, Any, ReturnT]]:
+        """Bind `run_zync` to the given mode.
+
+        This allows syntax like ``await f[zync_mode](...)`` instead of ``await f.run_zync(zync_mode, ...)``.
+        """
+        return partial(self.run_zync, zync_mode)
+
     @overload
     def __call__(self: 'BoundZyncMethod[SyncSelfT, P, ReturnT]', *args: P.args, **kwargs: P.kwargs) -> ReturnT: ...
     @overload
@@ -197,6 +205,13 @@ class BoundZyncClassMethod(Generic[SelfT, P, ReturnT]):
     async def run_async(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT:
         """Run the method in async mode."""
         return await self.func(self.cls, ASYNC, *args, **kwargs)
+
+    def __getitem__(self, zync_mode: Mode) -> Callable[P, Coroutine[Any, Any, ReturnT]]:
+        """Bind `run_zync` to the given mode.
+
+        This allows syntax like ``await f[zync_mode](...)`` instead of ``await f.run_zync(zync_mode, ...)``.
+        """
+        return partial(self.run_zync, zync_mode)
 
     @overload
     def __call__(self: 'BoundZyncClassMethod[SyncSelfT, P, ReturnT]', *args: P.args, **kwargs: P.kwargs) -> ReturnT: ...

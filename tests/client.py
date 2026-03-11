@@ -23,7 +23,7 @@ class BaseClient:
     @zyncio.zmethod
     async def nested_zmethod(self, zync_mode: zyncio.Mode, x: int) -> int:
         """Return `x` unchanged by calling through to `simple_zmethod`."""
-        return await self.simple_zmethod.run_zync(zync_mode, x)
+        return await self.simple_zmethod[zync_mode](x)
 
     @zyncio.zproperty
     async def simple_zproperty(self, zync_mode: zyncio.Mode) -> zyncio.Mode:
@@ -67,7 +67,7 @@ class BaseClient:
     @classmethod
     async def nested_class_method(cls, zync_mode: zyncio.Mode) -> type[Self]:
         """Return the class the method was called on by calling through to `class_method`."""
-        return await cls.class_method.run_zync(zync_mode)
+        return await cls.class_method[zync_mode]()
 
 
 class SyncClient(BaseClient, zyncio.SyncMixin):

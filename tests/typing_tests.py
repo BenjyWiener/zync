@@ -21,8 +21,10 @@ sync_client = SyncClient()
 async_client = AsyncClient()
 
 base_client.simple_zmethod(1)  # pyright: ignore[reportCallIssue]
+assert_type(asyncio.run(base_client.simple_zmethod[zyncio.Mode(...)](1)), int)
 assert_type(sync_client.simple_zmethod(1), int)
 assert_type(asyncio.run(async_client.simple_zmethod(1)), int)
+
 
 base_client.simple_zproperty  # pyright: ignore[reportAttributeAccessIssue]
 assert_type(sync_client.simple_zproperty, zyncio.Mode)

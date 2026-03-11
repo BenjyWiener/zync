@@ -63,6 +63,8 @@ asyncio.run(zync_sleep.run_async(3))
 @zyncio.zfunc
 async def sleep_3(zync_mode: zyncio.Mode) -> None:
     await zync_sleep.run_zync(zync_mode, 3)
+    # or
+    await zync_sleep[zync_mode](3)
 ```
 
 ### The real magic: `SyncMixin`/`AsyncMixin`, `zyncio.zmethod`, and `zyncio.zproperty`
@@ -108,15 +110,15 @@ class BaseClient:
 
     @zyncio.zmethod
     async def do_handshake(self, zync_mode: zyncio.Mode) -> None:
-        await self.send_msg.run_zync(zync_mode, HANDSHAKE_REQ)
-        response = await self.recv_msg.run_zync(zync_mode, len(HANDSHAKE_RESP))
+        await self.send_msg[zync_mode](HANDSHAKE_REQ)
+        response = await self.recv_msg[zync_mode](len(HANDSHAKE_RESP))
         if response != HANDSHAKE_RESP:
             raise RuntimeError('Handshake failed')
 
     @zyncio.zproperty
     async def status(self, zync_mode: zyncio.Mode) -> str:
-        await self.send_msg.run_zync(zync_mode, STATUS_REQ)
-        return (await self.recv_msg.run_zync(zync_mode, STATUS_RESP_LEN)).decode()
+        await self.send_msg[zync_mode](STATUS_REQ)
+        return (await self.recv_msg[zync_mode](STATUS_RESP_LEN)).decode()
 
 
 class SyncClient(BaseClient, zyncio.SyncMixin):
