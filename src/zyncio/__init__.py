@@ -3,10 +3,10 @@
 from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, contextmanager
 from enum import Enum
-from functools import partial
+from functools import cached_property, partial
 import sys
 from types import MethodType
-from typing import Any, Concatenate, Final, Generic, ParamSpec, TypeAlias, TypeVar, overload
+from typing import Any, Concatenate, Final, Generic, ParamSpec, TypeAlias, TypeVar, cast, overload
 from typing_extensions import Self
 
 import zyncio
@@ -40,17 +40,24 @@ class Mode(Enum):
 SYNC: Final = Mode.SYNC
 ASYNC: Final = Mode.ASYNC
 
-
+# NOTE: We use covariant `TypeVar`s in some places where we should technically use
+# invariant ones (such as `zclassmethod`, which should use `SelfT`, not `SelfT_co`).
+# Without this, some common accepted (although theoretically unsafe) patterns, such as
+# overriding `classmethod`s and `property`s would be flagged by type checkers.
+# In this case we've chosen convenience over correctness.
+CallableT = TypeVar('CallableT', bound=Callable[..., Any])
 P = ParamSpec('P')
 ReturnT = TypeVar('ReturnT')
+ReturnT_co = TypeVar('ReturnT_co', covariant=True)
 SelfT = TypeVar('SelfT')
+SelfT_co = TypeVar('SelfT_co', covariant=True)
 
 
-Zyncable = Callable[Concatenate[Mode, P], Coroutine[Any, Any, ReturnT]]
-ZyncableMethod = Callable[Concatenate[SelfT, Mode, P], Coroutine[Any, Any, ReturnT]]
+Zyncable = Callable[Concatenate[Mode, P], Coroutine[Any, Any, ReturnT_co]]
+ZyncableMethod = Callable[Concatenate[SelfT, Mode, P], Coroutine[Any, Any, ReturnT_co]]
 
 
-def _run_sync_coroutine(coro: Coroutine[Any, Any, ReturnT]) -> ReturnT:
+def _run_sync_coroutine(coro: Coroutine[Any, Any, ReturnT_co]) -> ReturnT_co:
     try:
         coro.send(None)
     except StopIteration as e:
@@ -59,27 +66,50 @@ def _run_sync_coroutine(coro: Coroutine[Any, Any, ReturnT]) -> ReturnT:
         raise RuntimeError('zyncio functions must only await pure coroutines in sync mode')
 
 
-class zfunc(Generic[P, ReturnT]):
-    """Wrap a function to run in both sync and async modes."""
-
-    def __init__(self, func: Zyncable[P, ReturnT]) -> None:
+class _ZyncFunctionWrapper(Generic[CallableT]):
+    def __init__(self, func: CallableT) -> None:
         """..
 
         :param func: The function to wrap.
         """
-        self.func: Final[Zyncable[P, ReturnT]] = func
+        if isinstance(func, classmethod):
+            func = cast(CallableT, func.__func__)
+        self.func: Final[CallableT] = func
+        self.__name__: str = getattr(func, '__name__', _UNKNOWN_FUNC_NAME)
+        self.__qualname__: str = getattr(func, '__qualname__', self.__name__)
+        self.__doc__: str | None = getattr(func, '__doc__', None)
+        if getattr(func, '__isabstractmethod__', False):
+            self.__isabstractmethod__: bool = True
+
+    def __repr__(self) -> str:
+        return f'<{self.__module__}.{type(self).__name__} {self.__qualname__}>'
+
+
+class _BoundZyncFunctionWrapper(Generic[SelfT, CallableT]):
+    def __init__(self, func: CallableT, instance: SelfT) -> None:
+        """..
+
+        :param func: The method to wrap.
+        :param instance: The instance to bind the method to.
+        """
+        self.func: Final[CallableT] = func
+        self.__self__: SelfT = instance
         self.__name__: str = getattr(func, '__name__', _UNKNOWN_FUNC_NAME)
         self.__qualname__: str = getattr(func, '__qualname__', self.__name__)
         self.__doc__: str | None = getattr(func, '__doc__', None)
 
     def __repr__(self) -> str:
-        return f'<{self.__module__}.{type(self).__name__} {self.__qualname__}>'
+        return f'<{self.__module__}.{type(self).__name__} {self.func.__qualname__} of {self.__self__!r}>'
 
-    def run_sync(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT:
+
+class zfunc(_ZyncFunctionWrapper[Zyncable[P, ReturnT_co]]):
+    """Wrap a function to run in both sync and async modes."""
+
+    def run_sync(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co:
         """Run the function in sync mode."""
         return _run_sync_coroutine(self.func(SYNC, *args, **kwargs))
 
-    async def run_async(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT:
+    async def run_async(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co:
         """Run the function in async mode."""
         return await self.func(ASYNC, *args, **kwargs)
 
@@ -104,80 +134,46 @@ SyncSelfT = TypeVar('SyncSelfT', bound=SyncMixin)
 AsyncSelfT = TypeVar('AsyncSelfT', bound=AsyncMixin)
 
 
-class zmethod(Generic[SelfT, P, ReturnT]):
+class zmethod(_ZyncFunctionWrapper[ZyncableMethod[SelfT_co, P, ReturnT_co]]):
     """Wrap a method to run in both sync and async modes."""
-
-    def __init__(self, func: ZyncableMethod[SelfT, P, ReturnT]) -> None:
-        """..
-
-        :param func: The method to wrap.
-        """
-        self.func: Final[ZyncableMethod[SelfT, P, ReturnT]] = func
-        self.__name__: str = getattr(func, '__name__', _UNKNOWN_FUNC_NAME)
-        self.__qualname__: str = getattr(func, '__qualname__', self.__name__)
-        self.__doc__: str | None = getattr(func, '__doc__', None)
-
-    def __repr__(self) -> str:
-        return f'<{self.__module__}.{type(self).__name__} {self.__qualname__}>'
 
     @overload
     def __get__(self, instance: None, owner: type[SelfT]) -> Self: ...
     @overload
-    def __get__(self, instance: SelfT, owner: type[SelfT] | None) -> 'BoundZyncMethod[SelfT, P, ReturnT]': ...
-    def __get__(self, instance: SelfT | None, owner: type[SelfT] | None) -> 'Self | BoundZyncMethod[SelfT, P, ReturnT]':
+    def __get__(self: 'zmethod[SelfT, P, ReturnT_co]', instance: SelfT, owner: type[SelfT] | None) -> 'BoundZyncMethod[SelfT, P, ReturnT_co]': ...
+    def __get__(
+        self: 'zmethod[SelfT, P, ReturnT_co]', instance: SelfT | None, owner: type[SelfT] | None
+    ) -> 'zmethod[SelfT, P, ReturnT_co] | BoundZyncMethod[SelfT, P, ReturnT_co]':
         if instance is None:
             return self
         return BoundZyncMethod(self.func, instance)
 
 
-class zclassmethod(Generic[SelfT, P, ReturnT]):
+class zclassmethod(_ZyncFunctionWrapper[ZyncableMethod[type[SelfT_co], P, ReturnT_co]]):
     """Wrap a method to run in both sync and async modes."""
 
-    def __init__(self, func: ZyncableMethod[type[SelfT], P, ReturnT]) -> None:
-        """..
-
-        :param func: The method to wrap.
-        """
-        self.func: Final[ZyncableMethod[type[SelfT], P, ReturnT]] = func.__func__ if isinstance(func, classmethod) else func
-        self.__name__: str = getattr(func, '__name__', _UNKNOWN_FUNC_NAME)
-        self.__qualname__: str = getattr(func, '__qualname__', self.__name__)
-        self.__doc__: str | None = getattr(func, '__doc__', None)
-
-    def __repr__(self) -> str:
-        return f'<{self.__module__}.{type(self).__name__} {self.__qualname__}>'
-
-    def __get__(self, instance: SelfT | None, owner: type[SelfT]) -> 'BoundZyncClassMethod[SelfT, P, ReturnT]':
+    def __get__(
+        self: 'zclassmethod[SelfT, P, ReturnT_co]', instance: SelfT | None, owner: type[SelfT]
+    ) -> 'BoundZyncClassMethod[SelfT, P, ReturnT_co]':
         return BoundZyncClassMethod(self.func, owner)
 
 
-class BoundZyncMethod(Generic[SelfT, P, ReturnT]):
+class BoundZyncMethod(_BoundZyncFunctionWrapper[SelfT, ZyncableMethod[SelfT, P, ReturnT_co]]):
     """A bound `zyncio.zmethod`."""
 
-    def __init__(self, func: ZyncableMethod[SelfT, P, ReturnT], instance: SelfT) -> None:
-        """..
-
-        :param func: The method to wrap.
-        :param instance: The instance to bind the method to.
-        """
-        self.func: Final[ZyncableMethod[SelfT, P, ReturnT]] = func
-        self.instance: Final[SelfT] = instance
-
-    def __repr__(self) -> str:
-        return f'<{self.__module__}.{type(self).__name__} {self.func.__qualname__} of {self.instance!r}>'
-
-    def run_zync(self, zync_mode: Mode, /, *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT]:
+    def run_zync(self, zync_mode: Mode, /, *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT_co]:
         """Run the method in the given mode."""
-        return self.func(self.instance, zync_mode, *args, **kwargs)
+        return self.func(self.__self__, zync_mode, *args, **kwargs)
 
-    def run_sync(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT:
+    def run_sync(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co:
         """Run the method in sync mode."""
-        return _run_sync_coroutine(self.func(self.instance, SYNC, *args, **kwargs))
+        return _run_sync_coroutine(self.func(self.__self__, SYNC, *args, **kwargs))
 
-    async def run_async(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT:
+    async def run_async(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co:
         """Run the method in async mode."""
-        return await self.func(self.instance, ASYNC, *args, **kwargs)
+        return await self.func(self.__self__, ASYNC, *args, **kwargs)
 
-    def __getitem__(self, zync_mode: Mode) -> Callable[P, Coroutine[Any, Any, ReturnT]]:
+    def __getitem__(self, zync_mode: Mode) -> Callable[P, Coroutine[Any, Any, ReturnT_co]]:
         """Bind `run_zync` to the given mode.
 
         This allows syntax like ``await f[zync_mode](...)`` instead of ``await f.run_zync(zync_mode, ...)``.
@@ -185,46 +181,42 @@ class BoundZyncMethod(Generic[SelfT, P, ReturnT]):
         return partial(self.run_zync, zync_mode)
 
     @overload
-    def __call__(self: 'BoundZyncMethod[SyncSelfT, P, ReturnT]', *args: P.args, **kwargs: P.kwargs) -> ReturnT: ...
+    def __call__(self: 'BoundZyncMethod[SyncSelfT, P, ReturnT_co]', *args: P.args, **kwargs: P.kwargs) -> ReturnT_co: ...
     @overload
-    def __call__(self: 'BoundZyncMethod[AsyncSelfT, P, ReturnT]', *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT]: ...
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT | Coroutine[Any, Any, ReturnT]:
-        if isinstance(self.instance, SyncMixin):
+    def __call__(self: 'BoundZyncMethod[AsyncSelfT, P, ReturnT_co]', *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT_co]: ...
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co | Coroutine[Any, Any, ReturnT_co]:
+        if isinstance(self.__self__, SyncMixin):
             return self.run_sync(*args, **kwargs)
-        elif isinstance(self.instance, AsyncMixin):
+        elif isinstance(self.__self__, AsyncMixin):
             return self.run_async(*args, **kwargs)
         else:
             raise TypeError(f'{type(self).__name__} is only callable when bound to instances of SyncMixin or AsyncMixin')
 
 
-class BoundZyncClassMethod(Generic[SelfT, P, ReturnT]):
+class BoundZyncClassMethod(_BoundZyncFunctionWrapper[type[SelfT], ZyncableMethod[type[SelfT], P, ReturnT_co]]):
     """A bound `zyncio.zclassmethod`."""
 
-    def __init__(self, func: ZyncableMethod[type[SelfT], P, ReturnT], cls: type[SelfT]) -> None:
+    def __init__(self, func: ZyncableMethod[type[SelfT], P, ReturnT_co], cls: type[SelfT]) -> None:
         """..
 
         :param func: The method to wrap.
         :param cls: The class to bind the method to.
         """
-        self.func: Final[ZyncableMethod[type[SelfT], P, ReturnT]] = func
-        self.cls: Final[type[SelfT]] = cls
+        super().__init__(func, cls)
 
-    def __repr__(self) -> str:
-        return f'<{self.__module__}.{type(self).__name__} {self.func.__qualname__} of {self.cls!r}>'
-
-    def run_zync(self, zync_mode: Mode, /, *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT]:
+    def run_zync(self, zync_mode: Mode, /, *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT_co]:
         """Run the method in the given mode."""
-        return self.func(self.cls, zync_mode, *args, **kwargs)
+        return self.func(self.__self__, zync_mode, *args, **kwargs)
 
-    def run_sync(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT:
+    def run_sync(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co:
         """Run the method in sync mode."""
-        return _run_sync_coroutine(self.func(self.cls, SYNC, *args, **kwargs))
+        return _run_sync_coroutine(self.func(self.__self__, SYNC, *args, **kwargs))
 
-    async def run_async(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT:
+    async def run_async(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co:
         """Run the method in async mode."""
-        return await self.func(self.cls, ASYNC, *args, **kwargs)
+        return await self.func(self.__self__, ASYNC, *args, **kwargs)
 
-    def __getitem__(self, zync_mode: Mode) -> Callable[P, Coroutine[Any, Any, ReturnT]]:
+    def __getitem__(self, zync_mode: Mode) -> Callable[P, Coroutine[Any, Any, ReturnT_co]]:
         """Bind `run_zync` to the given mode.
 
         This allows syntax like ``await f[zync_mode](...)`` instead of ``await f.run_zync(zync_mode, ...)``.
@@ -232,43 +224,40 @@ class BoundZyncClassMethod(Generic[SelfT, P, ReturnT]):
         return partial(self.run_zync, zync_mode)
 
     @overload
-    def __call__(self: 'BoundZyncClassMethod[SyncSelfT, P, ReturnT]', *args: P.args, **kwargs: P.kwargs) -> ReturnT: ...
+    def __call__(self: 'BoundZyncClassMethod[SyncSelfT, P, ReturnT_co]', *args: P.args, **kwargs: P.kwargs) -> ReturnT_co: ...
     @overload
-    def __call__(self: 'BoundZyncClassMethod[AsyncSelfT, P, ReturnT]', *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT]: ...
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT | Coroutine[Any, Any, ReturnT]:
-        if issubclass(self.cls, SyncMixin):
+    def __call__(self: 'BoundZyncClassMethod[AsyncSelfT, P, ReturnT_co]', *args: P.args, **kwargs: P.kwargs) -> Coroutine[Any, Any, ReturnT_co]: ...
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co | Coroutine[Any, Any, ReturnT_co]:
+        if issubclass(self.__self__, SyncMixin):
             return self.run_sync(*args, **kwargs)
-        elif issubclass(self.cls, AsyncMixin):
+        elif issubclass(self.__self__, AsyncMixin):
             return self.run_async(*args, **kwargs)
         else:
             raise TypeError(f'{type(self).__name__} is only callable when bound to subclasses of SyncMixin or AsyncMixin')
 
 
-class zproperty(Generic[SelfT, ReturnT]):
+class zproperty(_ZyncFunctionWrapper[ZyncableMethod[SelfT_co, [], ReturnT_co]]):
     """Wrap a method to act as a property in sync mode, and as a coroutine in async mode."""
 
-    def __init__(self, getter: ZyncableMethod[SelfT, [], ReturnT]) -> None:
+    def __init__(self, getter: ZyncableMethod[SelfT_co, [], ReturnT_co]) -> None:
         """..
 
         :param getter: The getter for this property.
         """
-        self.fget: Final[ZyncableMethod[SelfT, [], ReturnT]] = getter
-        self.__name__: str = getattr(getter, '__name__', _UNKNOWN_FUNC_NAME)
-        self.__qualname__: str = getattr(getter, '__qualname__', self.__name__)
-        self.__doc__: str | None = getattr(getter, '__doc__', None)
-
-    def __repr__(self) -> str:
-        return f'<{self.__module__}.{type(self).__name__} {self.__qualname__}>'
+        super().__init__(getter)
+        self.fget: Final[ZyncableMethod[SelfT_co, [], ReturnT_co]] = getter
 
     @overload
-    def __get__(self, instance: None, owner: type[SelfT]) -> Self: ...
+    def __get__(self: 'zproperty[SelfT, ReturnT_co]', instance: None, owner: type[SelfT]) -> 'zproperty[SelfT, ReturnT_co]': ...
     @overload
-    def __get__(self: 'zproperty[SyncSelfT, ReturnT]', instance: SyncSelfT, owner: type[SyncSelfT] | None) -> ReturnT: ...
+    def __get__(self: 'zproperty[SyncSelfT, ReturnT_co]', instance: SyncSelfT, owner: type[SyncSelfT] | None) -> ReturnT_co: ...
     @overload
     def __get__(
-        self: 'zproperty[AsyncSelfT, ReturnT]', instance: AsyncSelfT, owner: type[AsyncSelfT] | None
-    ) -> 'BoundZyncMethod[SelfT, [], ReturnT]': ...
-    def __get__(self, instance: SelfT | None, owner: type[SelfT] | None) -> 'Self | ReturnT | BoundZyncMethod[SelfT, [], ReturnT]':
+        self: 'zproperty[AsyncSelfT, ReturnT_co]', instance: AsyncSelfT, owner: type[AsyncSelfT] | None
+    ) -> 'BoundZyncMethod[AsyncSelfT, [], ReturnT_co]': ...
+    def __get__(
+        self: 'zproperty[SelfT, ReturnT_co]', instance: SelfT | None, owner: type[SelfT] | None
+    ) -> 'zproperty[SelfT, ReturnT_co] | ReturnT_co | BoundZyncMethod[SelfT, [], ReturnT_co]':
         if instance is None:
             return self
         elif isinstance(instance, SyncMixin):
@@ -277,7 +266,7 @@ class zproperty(Generic[SelfT, ReturnT]):
             return BoundZyncMethod(self.fget, instance)
         raise TypeError(f'{type(self).__name__} can only be accessed on instances of SyncMixin or AsyncMixin')
 
-    def setter(self, setter: ZyncableMethod[SelfT, [ReturnT], None]) -> 'ZyncSettableProperty[SelfT, ReturnT]':
+    def setter(self, setter: ZyncableMethod[SelfT_co, [ReturnT_co], None]) -> 'ZyncSettableProperty[SelfT_co, ReturnT_co]':
         """Return a new `ZyncSettableProperty` with the given setter."""
         return ZyncSettableProperty(self.fget, setter)
 
@@ -297,12 +286,14 @@ class ZyncSettableProperty(zproperty[SelfT, ReturnT]):
     @overload
     def __get__(self, instance: None, owner: type[SelfT]) -> Self: ...
     @overload
-    def __get__(self: 'zproperty[SyncSelfT, ReturnT]', instance: SyncSelfT, owner: type[SyncSelfT] | None) -> ReturnT: ...
+    def __get__(self: 'ZyncSettableProperty[SyncSelfT, ReturnT]', instance: SyncSelfT, owner: type[SyncSelfT] | None) -> ReturnT: ...
     @overload
     def __get__(
-        self: 'zproperty[AsyncSelfT, ReturnT]', instance: AsyncSelfT, owner: type[AsyncSelfT] | None
-    ) -> 'BoundZyncSettableProperty[SelfT, ReturnT]': ...
-    def __get__(self, instance: SelfT | None, owner: type[SelfT] | None) -> 'Self | ReturnT | BoundZyncSettableProperty[SelfT, ReturnT]':
+        self: 'ZyncSettableProperty[AsyncSelfT, ReturnT]', instance: AsyncSelfT, owner: type[AsyncSelfT] | None
+    ) -> 'BoundZyncSettableProperty[AsyncSelfT, ReturnT]': ...
+    def __get__(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, instance: SelfT | None, owner: type[SelfT] | None
+    ) -> 'ZyncSettableProperty[SelfT, ReturnT] | ReturnT | BoundZyncSettableProperty[Any, ReturnT]':
         if instance is None:
             return self
         elif isinstance(instance, SyncMixin):
@@ -338,41 +329,36 @@ class BoundZyncSettableProperty(BoundZyncMethod[SelfT, [], ReturnT]):
         super().__init__(getter, instance)
         self.fset: Final[ZyncableMethod[SelfT, [ReturnT], None]] = setter
 
-    async def set(self: 'BoundZyncSettableProperty[AsyncSelfT, ReturnT]', value: ReturnT) -> None:
+    async def set(self, value: ReturnT) -> None:
         """Set the value of the property."""
-        if not isinstance(self.instance, AsyncMixin):  # pragma: no cover
+        if not isinstance(self.__self__, AsyncMixin):  # pragma: no cover
             raise TypeError(f'{type(self).__name__}.set can only be used on instances of AsyncMixin')
-        return await BoundZyncMethod(self.fset, self.instance).run_async(value)
+        return await BoundZyncMethod(self.fset, self.__self__).run_async(value)
 
 
-ZyncableGeneratorFunc: TypeAlias = Callable[Concatenate[zyncio.Mode, P], AsyncGenerator[ReturnT]]
-ZyncableGeneratorMethod: TypeAlias = Callable[Concatenate[SelfT, zyncio.Mode, P], AsyncGenerator[ReturnT]]
+ZyncableGeneratorFunc: TypeAlias = Callable[Concatenate[zyncio.Mode, P], AsyncGenerator[ReturnT_co]]
+ZyncableGeneratorMethod: TypeAlias = Callable[Concatenate[SelfT, zyncio.Mode, P], AsyncGenerator[ReturnT_co]]
 
 
-class zcontextmanager(Generic[P, ReturnT]):
+class zcontextmanager(_ZyncFunctionWrapper[ZyncableGeneratorFunc[P, ReturnT_co]]):
     """Similar to `contextlib.contextmanager`, but usable in both sync and async modes."""
 
-    def __init__(self, func: ZyncableGeneratorFunc[P, ReturnT]) -> None:
+    def __init__(self, func: ZyncableGeneratorFunc[P, ReturnT_co]) -> None:
         """..
 
         :param func: The generator function to wrap.
         """
-        self.cm_func: Callable[Concatenate[Mode, P], AbstractAsyncContextManager[ReturnT]] = asynccontextmanager(func)
-        self.__name__: str = getattr(func, '__name__', _UNKNOWN_FUNC_NAME)
-        self.__qualname__: str = getattr(func, '__qualname__', self.__name__)
-        self.__doc__: str | None = getattr(func, '__doc__', None)
-
-    def __repr__(self) -> str:
-        return f'<{self.__module__}.{type(self).__name__} {self.__qualname__}>'
+        super().__init__(func)
+        self.cm_func: Callable[Concatenate[Mode, P], AbstractAsyncContextManager[ReturnT_co]] = asynccontextmanager(func)
 
     @asynccontextmanager
-    async def enter_zync(self, zync_mode: Mode, /, *args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[ReturnT]:
+    async def enter_zync(self, zync_mode: Mode, /, *args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[ReturnT_co]:
         """Enter the context manager in the given mode."""
         async with self.cm_func(zync_mode, *args, **kwargs) as val:
             yield val
 
     @contextmanager
-    def enter_sync(self, *args: P.args, **kwargs: P.kwargs) -> Generator[ReturnT]:
+    def enter_sync(self, *args: P.args, **kwargs: P.kwargs) -> Generator[ReturnT_co]:
         """Enter the context manager in sync mode."""
         cm = self.cm_func(SYNC, *args, **kwargs)
         val = _run_sync_coroutine(cm.__aenter__())
@@ -385,12 +371,12 @@ class zcontextmanager(Generic[P, ReturnT]):
             _run_sync_coroutine(cm.__aexit__(None, None, None))
 
     @asynccontextmanager
-    async def enter_async(self, *args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[ReturnT]:
+    async def enter_async(self, *args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[ReturnT_co]:
         """Enter the context manager in the given mode."""
         async with self.cm_func(ASYNC, *args, **kwargs) as val:
             yield val
 
-    def __getitem__(self, zync_mode: Mode) -> Callable[P, AbstractAsyncContextManager[ReturnT]]:
+    def __getitem__(self, zync_mode: Mode) -> Callable[P, AbstractAsyncContextManager[ReturnT_co]]:
         """Bind `enter_zync` to the given mode.
 
         This allows syntax like ``async with f[zync_mode](...)`` instead of ``async with f.enter_zync(zync_mode, ...)``.
@@ -398,61 +384,51 @@ class zcontextmanager(Generic[P, ReturnT]):
         return partial(self.enter_zync, zync_mode)
 
 
-class zcontextmanagermethod(Generic[SelfT, P, ReturnT]):
+class zcontextmanagermethod(_ZyncFunctionWrapper[ZyncableGeneratorMethod[SelfT_co, P, ReturnT_co]]):
     """Similar to `zyncio.zcontextmanager`, but binds `self` when accessed on an instance."""
 
-    def __init__(self, func: ZyncableGeneratorMethod[SelfT, P, ReturnT]) -> None:
+    def __init__(self, func: ZyncableGeneratorMethod[SelfT_co, P, ReturnT_co]) -> None:
         """..
 
         :param func: The generator method to wrap.
         """
-        self.func: Callable[Concatenate[SelfT, Mode, P], AsyncGenerator[ReturnT, None]] = func
-        self.__name__: str = getattr(func, '__name__', _UNKNOWN_FUNC_NAME)
-        self.__qualname__: str = getattr(func, '__qualname__', self.__name__)
-        self.__doc__: str | None = getattr(func, '__doc__', None)
-
-    def __repr__(self) -> str:
-        return f'<{self.__module__}.{type(self).__name__} {self.__qualname__}>'
+        super().__init__(func)
 
     @overload
     def __get__(self, instance: None, owner: type[SelfT]) -> Self: ...
     @overload
-    def __get__(self, instance: SelfT, owner: type[SelfT] | None) -> 'BoundZyncContextManagerMethod[SelfT, P, ReturnT]': ...
-    def __get__(self, instance: SelfT | None, owner: type[SelfT] | None) -> 'Self | BoundZyncContextManagerMethod[SelfT, P, ReturnT]':
+    def __get__(
+        self: 'zcontextmanagermethod[SelfT, P, ReturnT_co]', instance: SelfT, owner: type[SelfT] | None
+    ) -> 'BoundZyncContextManagerMethod[SelfT, P, ReturnT_co]': ...
+    def __get__(
+        self: 'zcontextmanagermethod[SelfT, P, ReturnT_co]', instance: SelfT | None, owner: type[SelfT] | None
+    ) -> 'zcontextmanagermethod[SelfT, P, ReturnT_co] | BoundZyncContextManagerMethod[SelfT, P, ReturnT_co]':
         if instance is None:
             return self
         return BoundZyncContextManagerMethod(self.func, instance)
 
 
-class BoundZyncContextManagerMethod(Generic[SelfT, P, ReturnT]):
+class BoundZyncContextManagerMethod(_BoundZyncFunctionWrapper[SelfT, ZyncableGeneratorMethod[SelfT, P, ReturnT_co]]):
     """A bound `zyncio.zcontextmanagermethod`."""
 
-    def __init__(self, func: ZyncableGeneratorMethod[SelfT, P, ReturnT], instance: SelfT) -> None:
-        """..
-
-        :param func: The generator method to wrap.
-        :param instance: The instance to bind the method to.
-        """
+    @cached_property
+    def _zync_cm(self) -> zcontextmanager[P, ReturnT_co]:
         # Use `MethodType` instead of `partial` to preserve `__name__`.
-        self.zync_cm: Final[zcontextmanager[P, ReturnT]] = zcontextmanager(MethodType(func, instance))
-        self.instance: Final[SelfT] = instance
+        return zcontextmanager(MethodType(self.func, self.__self__))
 
-    def __repr__(self) -> str:
-        return f'<{self.__module__}.{type(self).__name__} {self.zync_cm.__qualname__} of {self.instance!r}>'
-
-    def enter_zync(self, zync_mode: Mode, /, *args: P.args, **kwargs: P.kwargs) -> AbstractAsyncContextManager[ReturnT]:
+    def enter_zync(self, zync_mode: Mode, /, *args: P.args, **kwargs: P.kwargs) -> AbstractAsyncContextManager[ReturnT_co]:
         """Enter the context manager in the given mode."""
-        return self.zync_cm.enter_zync(zync_mode, *args, **kwargs)
+        return self._zync_cm.enter_zync(zync_mode, *args, **kwargs)
 
-    def enter_sync(self, *args: P.args, **kwargs: P.kwargs) -> AbstractContextManager[ReturnT]:
+    def enter_sync(self, *args: P.args, **kwargs: P.kwargs) -> AbstractContextManager[ReturnT_co]:
         """Enter the context manager in sync mode."""
-        return self.zync_cm.enter_sync(*args, **kwargs)
+        return self._zync_cm.enter_sync(*args, **kwargs)
 
-    def enter_async(self, *args: P.args, **kwargs: P.kwargs) -> AbstractAsyncContextManager[ReturnT]:
+    def enter_async(self, *args: P.args, **kwargs: P.kwargs) -> AbstractAsyncContextManager[ReturnT_co]:
         """Enter the context manager in async mode."""
-        return self.zync_cm.enter_async(*args, **kwargs)
+        return self._zync_cm.enter_async(*args, **kwargs)
 
-    def __getitem__(self, zync_mode: Mode) -> Callable[P, AbstractAsyncContextManager[ReturnT]]:
+    def __getitem__(self, zync_mode: Mode) -> Callable[P, AbstractAsyncContextManager[ReturnT_co]]:
         """Bind `enter_zync` to the given mode.
 
         This allows syntax like ``async with f[zync_mode](...)`` instead of ``async with f.enter_zync(zync_mode, ...)``.
@@ -461,16 +437,16 @@ class BoundZyncContextManagerMethod(Generic[SelfT, P, ReturnT]):
 
     @overload
     def __call__(
-        self: 'BoundZyncContextManagerMethod[SyncSelfT, P, ReturnT]', *args: P.args, **kwargs: P.kwargs
-    ) -> AbstractContextManager[ReturnT]: ...
+        self: 'BoundZyncContextManagerMethod[SyncSelfT, P, ReturnT_co]', *args: P.args, **kwargs: P.kwargs
+    ) -> AbstractContextManager[ReturnT_co]: ...
     @overload
     def __call__(
-        self: 'BoundZyncContextManagerMethod[AsyncSelfT, P, ReturnT]', *args: P.args, **kwargs: P.kwargs
-    ) -> AbstractAsyncContextManager[ReturnT]: ...
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> AbstractContextManager[ReturnT] | AbstractAsyncContextManager[ReturnT]:
-        if isinstance(self.instance, SyncMixin):
+        self: 'BoundZyncContextManagerMethod[AsyncSelfT, P, ReturnT_co]', *args: P.args, **kwargs: P.kwargs
+    ) -> AbstractAsyncContextManager[ReturnT_co]: ...
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> AbstractContextManager[ReturnT_co] | AbstractAsyncContextManager[ReturnT_co]:
+        if isinstance(self.__self__, SyncMixin):
             return self.enter_sync(*args, **kwargs)
-        elif isinstance(self.instance, AsyncMixin):
+        elif isinstance(self.__self__, AsyncMixin):
             return self.enter_async(*args, **kwargs)
         else:
             raise TypeError(f'{type(self).__name__} is only callable when bound to instances of SyncMixin or AsyncMixin')

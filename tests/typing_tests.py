@@ -7,7 +7,9 @@ and that invalid usages produce type errors.
 Expected errors are marked with `# pyright: ignore[...]` comments; `reportUnnecessaryTypeIgnore` will
 report lines that unexepectedly pass type checking.
 """
+# ruff: noqa: D101, D102
 
+from collections.abc import AsyncGenerator
 from typing_extensions import assert_type
 
 import zyncio
@@ -48,3 +50,34 @@ async def _() -> None:  # Allow using `await`
         assert_type(x, int)
     async with async_client.context_manager(1) as x:
         assert_type(x, int)
+
+
+# Check that overriding `zmethod` etc. is allowed.
+class Parent:
+    @zyncio.zmethod
+    async def method(self, zync_mode: zyncio.Mode) -> None: ...
+
+    @zyncio.zclassmethod
+    @classmethod
+    async def classmethod(cls, zync_mode: zyncio.Mode) -> None: ...
+
+    @zyncio.zproperty
+    async def property(self, zync_mode: zyncio.Mode) -> None: ...
+
+    @zyncio.zcontextmanagermethod
+    def contextmanagermethod(self, zync_mode: zyncio.Mode) -> AsyncGenerator[None]: ...
+
+
+class Child(Parent):
+    @zyncio.zmethod
+    async def method(self, zync_mode: zyncio.Mode) -> None: ...
+
+    @zyncio.zclassmethod
+    @classmethod
+    async def classmethod(cls, zync_mode: zyncio.Mode) -> None: ...
+
+    @zyncio.zproperty
+    async def property(self, zync_mode: zyncio.Mode) -> None: ...
+
+    @zyncio.zcontextmanagermethod
+    def contextmanagermethod(self, zync_mode: zyncio.Mode) -> AsyncGenerator[None]: ...

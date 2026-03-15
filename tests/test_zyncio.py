@@ -1,5 +1,6 @@
 """Unit tests for zyncio."""
 
+import abc
 import asyncio
 from collections.abc import AsyncGenerator
 import random
@@ -52,6 +53,24 @@ def test_invalid_zfunc() -> None:
 
     with pytest.raises(RuntimeError, match=r'sync mode'):
         asyncio.run(async_wrapper())
+
+
+def test_abstract_zmethod() -> None:
+    """Test that instantiating an ABC with an abstract `zmethod`fails."""
+
+    class Abstract(abc.ABC):
+        @zyncio.zmethod
+        @abc.abstractmethod
+        async def abstract(self, zync_mode: zyncio.Mode) -> None: ...  # pragma: no cover
+
+    with pytest.raises(TypeError, match=r'abstract method'):
+        Abstract()  # pyright: ignore[reportAbstractUsage]
+
+    class Concrete(Abstract):
+        @zyncio.zmethod
+        async def abstract(self, zync_mode: zyncio.Mode) -> None: ...  # pragma: no cover
+
+    Concrete()
 
 
 def test_zmethod_sync(rand_int: int) -> None:
