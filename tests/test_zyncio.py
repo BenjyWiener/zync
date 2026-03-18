@@ -4,6 +4,7 @@ import abc
 import asyncio
 from collections.abc import AsyncGenerator
 import random
+from typing import Generic
 
 import pytest
 
@@ -68,17 +69,19 @@ def test_invalid_zfunc() -> None:
 def test_abstract_zmethod() -> None:
     """Test that instantiating an ABC with an abstract `zmethod`fails."""
 
-    class Abstract(abc.ABC):
+    class Abstract(Generic[zyncio.ZyncModeT_co], abc.ABC):
+        __zync_mode__: zyncio.ZyncModeT_co
+
         @zyncio.zmethod
         @abc.abstractmethod
-        async def abstract(self, zync_mode: zyncio.Mode) -> None: ...  # pragma: no cover
+        async def abstract(self) -> None: ...  # pragma: no cover
 
     with pytest.raises(TypeError, match=r'abstract method'):
         Abstract()  # pyright: ignore[reportAbstractUsage]
 
     class Concrete(Abstract):
         @zyncio.zmethod
-        async def abstract(self, zync_mode: zyncio.Mode) -> None: ...  # pragma: no cover
+        async def abstract(self) -> None: ...  # pragma: no cover
 
     Concrete()
 
@@ -98,7 +101,7 @@ def test_zmethod_async(rand_int: int) -> None:
 def test_zmethod_no_mixin(rand_int: int) -> None:
     """Test that calling a `zmethod` raises if no mixin is used."""
     client = BaseClient()
-    with pytest.raises(TypeError, match=r'Mixin'):
+    with pytest.raises(TypeError, match=r'__zync_mode__'):
         client.simple_zmethod(rand_int)  # pyright: ignore[reportCallIssue]
 
 
@@ -135,7 +138,7 @@ def test_zproperty_async() -> None:
 def test_zproperty_no_mixin() -> None:
     """Test that accessing a `zproperty` raises if no mixin is used."""
     client = BaseClient()
-    with pytest.raises(TypeError, match=r'Mixin'):
+    with pytest.raises(TypeError, match=r'__zync_mode__'):
         client.simple_zproperty  # pyright: ignore[reportAttributeAccessIssue]
 
 
@@ -164,14 +167,14 @@ async def test_settable_zproperty_async() -> None:
     await client.settable_zproperty.set(new_value)
     assert await client.settable_zproperty() == new_value
 
-    with pytest.raises(TypeError, match=r'Mixin'):
+    with pytest.raises(TypeError, match=r'async mode'):
         client.settable_zproperty = new_value  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_settable_zproperty_no_mixin() -> None:
     """Test that accessing a `ZyncSettableProperty` raises if no mixin is used."""
     client = BaseClient()
-    with pytest.raises(TypeError, match=r'Mixin'):
+    with pytest.raises(TypeError, match=r'__zync_mode__'):
         client.settable_zproperty  # pyright: ignore[reportAttributeAccessIssue]
 
 
@@ -194,7 +197,7 @@ def test_zclassmethod_async() -> None:
 
 def test_zclassmethod_no_mixin() -> None:
     """Test that calling a `zclassmethod` raises if no mixin is used."""
-    with pytest.raises(TypeError, match=r'Mixin'):
+    with pytest.raises(TypeError, match=r'__zync_mode__'):
         BaseClient.class_method()  # pyright: ignore[reportCallIssue]
 
 
@@ -307,16 +310,16 @@ async def test_zcontextmanagermethod_async(rand_int: int) -> None:
 
 @pytest.mark.asyncio
 async def test_zcontextmanagermethod_zync(rand_int: int) -> None:
-    """Test `zcontextmanagermethod.enter_zync`."""
+    """Test `zcontextmanagermethod.zync`."""
     async_client = AsyncClient()
-    async with async_client.context_manager.enter_zync(zyncio.ASYNC, rand_int) as val:
+    async with async_client.context_manager.zync(rand_int) as val:
         assert rand_int == val
 
 
 def test_zcontextmanagermethod_no_mixin() -> None:
     """Test that calling a `zcontextmanagermethod` raises if no mixin is used."""
     client = BaseClient()
-    with pytest.raises(TypeError, match=r'Mixin'):
+    with pytest.raises(TypeError, match=r'__zync_mode__'):
         client.context_manager()  # pyright: ignore[reportCallIssue]
 
 
@@ -369,7 +372,7 @@ async def test_zgenerator_zync() -> None:
 
 
 @pytest.mark.asyncio
-async def test_zgenerator_subscript(rand_int: int) -> None:
+async def test_zgenerator_subscript() -> None:
     """Test `zgenerator.__getitem__`."""
     numbers = random.choices(range(1, 100), k=10)
     assert [n async for n in simple_generator[zyncio.ASYNC](*numbers)] == numbers
@@ -425,16 +428,16 @@ async def test_nested_zgeneratormethod_async(rand_int: int) -> None:
 
 @pytest.mark.asyncio
 async def test_zgeneratormethod_zync(rand_int: int) -> None:
-    """Test `zgeneratormethod.run_zync`."""
+    """Test `zgeneratormethod.zync`."""
     client = AsyncClient()
     numbers = random.choices(range(1, 100), k=10)
-    assert [n async for n in client.nested_generator.run_zync(zyncio.ASYNC, rand_int, numbers)] == [rand_int * n for n in numbers]
+    assert [n async for n in client.nested_generator.zync(rand_int, numbers)] == [rand_int * n for n in numbers]
 
 
 def test_zgeneratormethod_no_mixin() -> None:
     """Test that calling a `zgeneratormethod` raises if no mixin is used."""
     client = BaseClient()
-    with pytest.raises(TypeError, match=r'Mixin'):
+    with pytest.raises(TypeError, match=r'__zync_mode__'):
         client.generator_with_send()  # pyright: ignore[reportCallIssue]
 
 
