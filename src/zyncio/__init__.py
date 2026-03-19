@@ -14,6 +14,7 @@ __all__ = [
     'SYNC',
     'ASYNC',
     'ZyncModeT_co',
+    'run_sync',
     'zfunc',
     'zmethod',
     'zclassmethod',
@@ -184,7 +185,13 @@ Zyncable = Callable[Concatenate[Mode, P], Coroutine[Any, Any, ReturnT_co]]
 ZyncableMethod = Callable[Concatenate[ZyncSelfT_co, P], Coroutine[Any, Any, ReturnT_co]]
 
 
-def _run_sync_coroutine(coro: Coroutine[Any, Any, ReturnT_co]) -> ReturnT_co:
+def run_sync(coro: Coroutine[Any, Any, ReturnT_co]) -> ReturnT_co:
+    """Run a zyncio coroutine synchronously.
+
+    The coroutine must only await other coroutines, recursively.
+    Awaiting any non-coroutine (such as an `asyncio.Future`), at any point in the call chain,
+    will cause the function to fail.
+    """
     try:
         coro.send(None)
     except StopIteration as e:
@@ -238,7 +245,7 @@ class zfunc(_ZyncFunctionWrapper[Zyncable[P, ReturnT_co]]):
 
     def run_sync(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co:
         """Run the function in sync mode."""
-        return _run_sync_coroutine(self.func(SYNC, *args, **kwargs))
+        return run_sync(self.func(SYNC, *args, **kwargs))
 
     async def run_async(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co:
         """Run the function in async mode."""
@@ -283,7 +290,7 @@ class BoundZyncMethod(_BoundZyncFunctionWrapper[ZyncSelfT_co, ZyncableMethod[Zyn
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co | Coroutine[Any, Any, ReturnT_co]:
         match _get_zync_mode(self.__self__):
             case Mode.SYNC:
-                return _run_sync_coroutine(self.func(self.__self__, *args, **kwargs))
+                return run_sync(self.func(self.__self__, *args, **kwargs))
             case Mode.ASYNC:
                 return self.func(self.__self__, *args, **kwargs)
             case _:
@@ -321,7 +328,7 @@ class BoundZyncClassMethod(_BoundZyncFunctionWrapper[type[ZyncSelfT], ZyncableMe
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> ReturnT_co | Coroutine[Any, Any, ReturnT_co]:
         match _get_zync_mode(self.__self__):
             case Mode.SYNC:
-                return _run_sync_coroutine(self.func(self.__self__, *args, **kwargs))
+                return run_sync(self.func(self.__self__, *args, **kwargs))
             case Mode.ASYNC:
                 return self.func(self.__self__, *args, **kwargs)
             case _:
@@ -355,7 +362,7 @@ class zproperty(_ZyncFunctionWrapper[ZyncableMethod[ZyncSelfT_co, [], ReturnT_co
 
         match _get_zync_mode(instance):
             case Mode.SYNC:
-                return _run_sync_coroutine(self.fget(instance))
+                return run_sync(self.fget(instance))
             case Mode.ASYNC:
                 return BoundZyncMethod(self.fget, instance)
             case _:
@@ -398,7 +405,7 @@ class ZyncSettableProperty(zproperty[ZyncSelfT, ReturnT]):
 
         match _get_zync_mode(instance):
             case Mode.SYNC:
-                return _run_sync_coroutine(self.fget(instance))
+                return run_sync(self.fget(instance))
             case Mode.ASYNC:
                 return BoundZyncSettableProperty(self.fget, self.fset, instance)
             case _:
@@ -407,7 +414,7 @@ class ZyncSettableProperty(zproperty[ZyncSelfT, ReturnT]):
     def __set__(self: 'ZyncSettableProperty[SyncSelfT, ReturnT]', instance: SyncSelfT, value: ReturnT) -> None:
         match _get_zync_mode(instance):
             case Mode.SYNC:
-                return _run_sync_coroutine(self.fset(instance, value))
+                return run_sync(self.fset(instance, value))
             case Mode.ASYNC:
                 raise TypeError(f'{type(self).__name__}.__set__ does not support async mode')
             case _:  # pragma: no cover
@@ -452,14 +459,14 @@ ZyncableGeneratorMethod: TypeAlias = Callable[Concatenate[ZyncSelfT, P], AsyncGe
 
 @contextmanager
 def _async_context_manager_to_sync(cm: AbstractAsyncContextManager[ReturnT_co]) -> Generator[ReturnT_co]:
-    val = _run_sync_coroutine(cm.__aenter__())
+    val = run_sync(cm.__aenter__())
     try:
         yield val
     except BaseException:
-        if not _run_sync_coroutine(cm.__aexit__(*sys.exc_info())):
+        if not run_sync(cm.__aexit__(*sys.exc_info())):
             raise
     else:
-        _run_sync_coroutine(cm.__aexit__(None, None, None))
+        run_sync(cm.__aexit__(None, None, None))
 
 
 class zcontextmanager(_ZyncFunctionWrapper[ZyncableGeneratorFunc[P, ReturnT_co, None]]):
@@ -568,9 +575,9 @@ class zgenerator(_ZyncFunctionWrapper[ZyncableGeneratorFunc[P, ReturnT_co, SendT
         """Run the generator function in sync mode."""
         async_gen = self.func(SYNC, *args, **kwargs)
         try:
-            send_val = yield _run_sync_coroutine(anext(async_gen))
+            send_val = yield run_sync(anext(async_gen))
             while True:
-                send_val = yield _run_sync_coroutine(async_gen.asend(send_val))
+                send_val = yield run_sync(async_gen.asend(send_val))
         except StopAsyncIteration:
             pass
 
@@ -622,9 +629,9 @@ class BoundZyncGeneratorMethod(_BoundZyncFunctionWrapper[ZyncSelfT, ZyncableGene
         """Run the generator function as an async generator regardless of mode."""
         async_gen = self.func(self.__self__, *args, **kwargs)
         try:
-            send_val = yield _run_sync_coroutine(anext(async_gen))
+            send_val = yield run_sync(anext(async_gen))
             while True:
-                send_val = yield _run_sync_coroutine(async_gen.asend(send_val))
+                send_val = yield run_sync(async_gen.asend(send_val))
         except StopAsyncIteration:
             pass
 
