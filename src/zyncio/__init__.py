@@ -6,7 +6,7 @@ from enum import Enum
 from functools import cached_property, partial, wraps
 import sys
 from typing import Any, Concatenate, Final, Generic, Literal, ParamSpec, Protocol, TypeAlias, TypeVar, cast, overload
-from typing_extensions import Self
+from typing_extensions import Self, TypeIs
 
 
 __all__ = [
@@ -16,6 +16,8 @@ __all__ = [
     'ZyncModeT_co',
     'run_sync',
     'make_sync',
+    'is_sync',
+    'is_async',
     'zfunc',
     'zmethod',
     'zclassmethod',
@@ -251,6 +253,16 @@ def make_sync(func: Callable[P, Coroutine[Any, Any, ReturnT_co]]) -> Callable[P,
         return run_sync(func(*args, **kwargs))
 
     return wrapper
+
+
+def is_sync(obj: object) -> TypeIs[_SyncProtocol | _SyncProxyProtocol]:
+    """Check if `obj` is a subclass of `zyncio.SyncMixin` or ``zyncio.is_sync(obj.__zync_proxy__())`` returns ``True``."""
+    return _get_zync_mode(obj) is SYNC
+
+
+def is_async(obj: object) -> TypeIs[_AsyncProtocol | _AsyncProxyProtocol]:
+    """Check if `obj` is a subclass of `zyncio.AsyncMixin` or ``zyncio.is_async(obj.__zync_proxy__())`` returns ``True``."""
+    return _get_zync_mode(obj) is ASYNC
 
 
 class _ZyncFunctionWrapper(Generic[CallableT]):

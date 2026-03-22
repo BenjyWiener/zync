@@ -502,3 +502,15 @@ def test_incorrect_mixin_inheritance_order() -> None:
 
         class BadGrandhild(Child, OtherClass, zyncio.SyncMixin):
             pass
+
+
+def test_type_guards(rand_int: int) -> None:
+    """Test the `is_sync` and `is_async` type guards."""
+    clients: list[BaseClient] = [SyncClient(), AsyncClient()]
+    for client in clients:
+        if zyncio.is_sync(client):
+            assert client.simple_zmethod(rand_int) == rand_int
+        elif zyncio.is_async(client):
+            assert asyncio.run(client.simple_zmethod(rand_int)) == rand_int
+        else:
+            pass  # pragma: no cover
