@@ -178,7 +178,10 @@ def _get_zync_mode(obj: object) -> Mode | None:
 
     if (proxy_func := getattr(obj, '__zync_proxy__', None)) and callable(proxy_func):
         mode = _get_zync_mode(proxy_func())
-        obj.__zync_mode__ = mode  # pyright: ignore[reportAttributeAccessIssue]
+        if hasattr(obj, '__dict__'):
+            obj.__dict__['__zync_mode__'] = mode
+        else:
+            pass  # pragma: no cover
         return mode
 
     return None  # pragma: no cover
