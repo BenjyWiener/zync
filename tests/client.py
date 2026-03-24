@@ -25,7 +25,7 @@ class BaseClient(zyncio.ZyncBase):
     @zyncio.zmethod
     async def nested_zmethod(self, x: int) -> int:
         """Return `x` unchanged by calling through to `simple_zmethod`."""
-        return await self.simple_zmethod.zync(x)
+        return await self.simple_zmethod._(x)
 
     @zyncio.zproperty
     async def simple_zproperty(self) -> zyncio.Mode:
@@ -74,7 +74,7 @@ class BaseClient(zyncio.ZyncBase):
     @classmethod
     async def nested_class_method(cls) -> type[Self]:
         """Return the class the method was called on by calling through to `class_method`."""
-        return await cls.class_method.zync()
+        return await cls.class_method._()
 
     @zyncio.zcontextmanagermethod
     async def context_manager(self, x: int) -> AsyncGenerator[int]:
@@ -84,7 +84,7 @@ class BaseClient(zyncio.ZyncBase):
     @zyncio.zcontextmanagermethod
     async def nested_context_manager(self, x: int) -> AsyncGenerator[int]:
         """Yield `x` unchanged by calling through to to `context_manager`."""
-        async with self.context_manager.zync(x) as y:
+        async with self.context_manager._(x) as y:
             yield y
 
     @zyncio.zgeneratormethod
@@ -97,7 +97,7 @@ class BaseClient(zyncio.ZyncBase):
     @zyncio.zgeneratormethod
     async def nested_generator(self, factor: int, numbers: Iterable[int]) -> AsyncGenerator[int]:
         """Yield numbers from `numbers` multiplied by `factor` by calling through to `generator_with_send`."""
-        gen = self.generator_with_send.zync(factor)
+        gen = self.generator_with_send._(factor)
         await anext(gen)  # Prime the generator
         for n in numbers:
             yield await gen.asend(n)
@@ -151,4 +151,4 @@ class ClientUser(Generic[ClientT]):
     @zyncio.zmethod
     async def use(self, x: int) -> int:
         """Return `x` unchanged by calling through to `self.client.simple_zmethod`."""
-        return await self.client.simple_zmethod.zync(x)
+        return await self.client.simple_zmethod._(x)
