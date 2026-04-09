@@ -70,8 +70,6 @@ def test_abstract_zmethod() -> None:
     """Test that instantiating an ABC with an abstract `zmethod`fails."""
 
     class Abstract(Generic[zyncio.ZyncModeT_co], abc.ABC):
-        __zync_mode__: zyncio.ZyncModeT_co
-
         @zyncio.zmethod
         @abc.abstractmethod
         async def abstract(self) -> None: ...  # pragma: no cover
@@ -466,51 +464,87 @@ def test_zgeneratormethod_get_from_class() -> None:
     assert isinstance(SyncClient.generator_with_send, zyncio.zgeneratormethod)
 
 
-def test_zync_proxy_sync(rand_int: int) -> None:
-    """Test `__zync_proxy__` functionality with a sync client."""
+def test_zync_delegate_sync(rand_int: int) -> None:
+    """Test `zyncio.ZyncDelegator` functionality with a sync client."""
     client = SyncClient()
     assert client.user.use(rand_int) == rand_int
 
 
 @pytest.mark.asyncio
-async def test_zync_proxy_async(rand_int: int) -> None:
-    """Test `__zync_proxy__` functionality with an async client."""
+async def test_zync_delegate_async(rand_int: int) -> None:
+    """Test `zyncio.ZyncDelegator` functionality with an async client."""
     client = AsyncClient()
     assert await client.user.use(rand_int) == rand_int
 
 
-def test_incorrect_mixin_inheritance_order() -> None:
-    """Test inherittance checks for `zyncio.SyncMixin` or `zyncio.AsyncMixin`.
+def test_zync_nested_delegate_sync(rand_int: int) -> None:
+    """Test nested `zyncio.ZyncDelegator` functionality with a sync client."""
+    client = SyncClient()
+    assert client.user.user.use(rand_int) == rand_int
 
-    Inheritting from one of the mixins in a way that shadows `__zync_mode__` should
-    raise a `TypeError`.
-    """
-    # Direct inheritance
-    with pytest.raises(TypeError, match=r'shadowed by definition in parent BaseClient'):
 
-        class BadChild(BaseClient, zyncio.SyncMixin):
-            pass
+def test_zync_delegate_caching() -> None:
+    """Test that `zyncio.get_mode` caches the mode of a `ZyncDelegator` object."""
 
-    class Child(BaseClient):
-        pass
+    class Delegator:
+        call_count: int = 0
 
-    class OtherClass:
-        pass
+        def __zync_delegate__(self) -> SyncClient:
+            self.call_count += 1
+            return SyncClient()
 
-    # Indirect inheritance, error should mention the direct base class
-    with pytest.raises(TypeError, match=r'shadowed by definition in parent Child'):
+    delegator = Delegator()
 
-        class BadGrandhild(Child, OtherClass, zyncio.SyncMixin):
-            pass
+    assert zyncio.get_mode(delegator) is zyncio.SYNC
+    assert zyncio.get_mode(delegator) is zyncio.SYNC
+
+    assert delegator.call_count == 1
+
+
+def test_zync_delegate_caching_failure() -> None:
+    """Test that `zyncio.get_mode` doesn't raise when caching fails."""
+
+    class Delegator:
+        __slots__ = ('call_count',)
+
+        def __init__(self) -> None:
+            self.call_count: int = 0
+
+        def __zync_delegate__(self) -> SyncClient:
+            self.call_count += 1
+            return SyncClient()
+
+    delegator = Delegator()
+
+    assert zyncio.get_mode(delegator) is zyncio.SYNC
+    assert zyncio.get_mode(delegator) is zyncio.SYNC
+
+    assert delegator.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_zync_nested_delegate_async(rand_int: int) -> None:
+    """Test nested `zyncio.ZyncDelegator` functionality with an async client."""
+    client = AsyncClient()
+    assert await client.user.user.use(rand_int) == rand_int
 
 
 def test_type_guards(rand_int: int) -> None:
-    """Test the `is_sync` and `is_async` type guards."""
+    """Test the `is_sync`, `is_async`, `is_sync_class`, and `is_async_class` type guards."""
     clients: list[BaseClient] = [SyncClient(), AsyncClient()]
     for client in clients:
         if zyncio.is_sync(client):
             assert client.simple_zmethod(rand_int) == rand_int
         elif zyncio.is_async(client):
             assert asyncio.run(client.simple_zmethod(rand_int)) == rand_int
+        else:
+            pass  # pragma: no cover
+
+    client_classes: list[type[BaseClient]] = [SyncClient, AsyncClient]
+    for client_class in client_classes:
+        if zyncio.is_sync_class(client_class):
+            assert client_class.class_method() is SyncClient
+        elif zyncio.is_async_class(client_class):
+            assert asyncio.run(client_class.class_method()) is AsyncClient
         else:
             pass  # pragma: no cover

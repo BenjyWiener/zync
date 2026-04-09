@@ -9,13 +9,13 @@ import zyncio
 from .utils import assert_no_running_loop, assert_running_loop
 
 
-class BaseClient(zyncio.ZyncBase):
+class BaseClient:
     """A basic zyncio-based client."""
 
     @zyncio.zmethod
     async def simple_zmethod(self, x: int) -> int:
         """Return `x` unchanged."""
-        if self.__zync_mode__ is zyncio.SYNC:
+        if zyncio.is_sync(self):
             assert_no_running_loop()
         else:
             assert_running_loop()
@@ -28,12 +28,12 @@ class BaseClient(zyncio.ZyncBase):
         return await self.simple_zmethod._(x)
 
     @zyncio.zproperty
-    async def simple_zproperty(self) -> zyncio.Mode:
+    async def simple_zproperty(self) -> zyncio.Mode | None:
         """Return the zyncio mode."""
-        return self.__zync_mode__
+        return zyncio.get_mode(self)
 
     @zyncio.zproperty
-    async def nested_property(self) -> zyncio.Mode:
+    async def nested_property(self) -> zyncio.Mode | None:
         """Return the zyncio mode by calling through to `simple_property`."""
         return await type(self).simple_zproperty(self)
 
@@ -42,7 +42,7 @@ class BaseClient(zyncio.ZyncBase):
     @zyncio.zproperty
     async def _settable_zproperty_getter(self) -> int:
         """Return the zyncio mode."""
-        if self.__zync_mode__ is zyncio.SYNC:
+        if zyncio.is_sync(self):
             assert_no_running_loop()
         else:
             assert_running_loop()
@@ -52,7 +52,7 @@ class BaseClient(zyncio.ZyncBase):
     @_settable_zproperty_getter.setter
     async def settable_zproperty(self, value: int) -> None:
         """Set the zyncio mode."""
-        if self.__zync_mode__ is zyncio.SYNC:
+        if zyncio.is_sync(self):
             assert_no_running_loop()
         else:
             assert_running_loop()
@@ -63,7 +63,7 @@ class BaseClient(zyncio.ZyncBase):
     @classmethod
     async def class_method(cls) -> type[Self]:
         """Return the class the method was called on."""
-        if cls.__zync_mode__ is zyncio.SYNC:
+        if zyncio.is_sync_class(cls):
             assert_no_running_loop()
         else:
             assert_running_loop()
@@ -113,42 +113,66 @@ class BaseClient(zyncio.ZyncBase):
         return ClientUser(self)
 
 
-ClientT = TypeVar('ClientT', bound=BaseClient)
+ClientT_co = TypeVar('ClientT_co', bound=BaseClient, covariant=True)
 
 
 @overload
-async def overloaded_method(self: ClientT, return_self: Literal[True]) -> ClientT: ...
+async def overloaded_method(self: ClientT_co, return_self: Literal[True]) -> ClientT_co: ...
 @overload
 async def overloaded_method(self, return_self: Literal[False]) -> None: ...
-async def overloaded_method(self: ClientT, return_self: bool) -> ClientT | None:
+async def overloaded_method(self: ClientT_co, return_self: bool) -> ClientT_co | None:
     """Return `self` iff `return_self` is `True`, otherwise return `None`."""
     if return_self:
         return self
 
 
-class SyncClient(zyncio.SyncMixin, BaseClient):
+class SyncClient(BaseClient, zyncio.SyncMixin):
     """A sync client."""
 
     overloaded_method = zyncio.make_sync(overloaded_method)
 
 
-class AsyncClient(zyncio.AsyncMixin, BaseClient):
+class AsyncClient(BaseClient, zyncio.AsyncMixin):
     """An async client."""
 
     overloaded_method = overloaded_method
 
 
-class ClientUser(Generic[ClientT]):
-    """A class that uses a client, for testing `__zync_proxy__`."""
+class ClientUser(Generic[ClientT_co]):
+    """A class that uses a client, for testing `zyncio.ZyncDelegator`."""
 
-    def __init__(self, client: ClientT) -> None:
+    def __init__(self, client: ClientT_co) -> None:
         """Initialize the client user."""
-        self.client: ClientT = client
+        self.client: ClientT_co = client
 
-    def __zync_proxy__(self) -> ClientT:
+    def __zync_delegate__(self) -> ClientT_co:
         return self.client
 
     @zyncio.zmethod
     async def use(self, x: int) -> int:
         """Return `x` unchanged by calling through to `self.client.simple_zmethod`."""
         return await self.client.simple_zmethod._(x)
+
+    @property
+    def user(self) -> 'ClientUserUser[Self]':
+        """Get a `ClientUser` bound to `self`."""
+        return ClientUserUser(self)
+
+
+ClientUserT_co = TypeVar('ClientUserT_co', bound=ClientUser[BaseClient])
+
+
+class ClientUserUser(Generic[ClientUserT_co]):
+    """A class that uses a client user, for testing `zyncio.ZyncDelegator` with nested delegation."""
+
+    def __init__(self, client_user: ClientUserT_co) -> None:
+        """Initialize the client user user."""
+        self.client_user: ClientUserT_co = client_user
+
+    def __zync_delegate__(self) -> ClientUserT_co:
+        return self.client_user
+
+    @zyncio.zmethod
+    async def use(self, x: int) -> int:
+        """Return `x` unchanged by calling through to `self.client_user.use`."""
+        return await self.client_user.use._(x)

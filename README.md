@@ -84,13 +84,13 @@ The real power of ZyncIO comes out when implementing client interfaces:
    methods on the async client.
 
 ```python
-class BaseClient(zyncio.ZyncBase):
+class BaseClient:
     def __init__(self, sock: socket.socket) -> None:
         self.sock: socket.socket = sock
 
     @zyncio.zmethod
     async def send_msg(self, data: bytes) -> None:
-        if self.__zync_mode__ is zyncio.SYNC:
+        if zyncio.is_sync(self):
             self.sock.sendall(data)
         else:
             loop = asyncio.get_running_loop()
@@ -99,7 +99,7 @@ class BaseClient(zyncio.ZyncBase):
     @zyncio.zmethod
     async def recv_msg(self, n: int) -> bytes:
         buf = b''
-        if self.__zync_mode__ is zyncio.SYNC:
+        if zyncio.is_sync(self):
             while len(buf) < n:
                 buf += self.sock.recv(n)
         else:
@@ -122,12 +122,12 @@ class BaseClient(zyncio.ZyncBase):
         await self.send_msg._(STATUS_REQ)
         return (await self.recv_msg._(STATUS_RESP_LEN)).decode()
 
-# IMPORTANT: The mixins need to come *before* the base class!
-class SyncClient(zyncio.SyncMixin, BaseClient):
+
+class SyncClient(BaseClient, zyncio.SyncMixin):
     pass
 
 
-class AsyncClient(zyncio.AsyncMixin, BaseClient):
+class AsyncClient(BaseClient, zyncio.AsyncMixin):
     def __init__(self, sock: socket.socket) -> None:
         super().__init__(sock)
         self.sock.setblocking(False)

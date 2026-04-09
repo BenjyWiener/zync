@@ -5,7 +5,7 @@ The tests are designed to ensure that valid usages have correct types inferred,
 and that invalid usages produce type errors.
 
 Expected errors are marked with `# pyright: ignore[...]` comments; `reportUnnecessaryTypeIgnore` will
-report lines that unexepectedly pass type checking.
+report lines that unexpectedly pass type checking.
 """
 # ruff: noqa: D101, D102
 
@@ -29,8 +29,8 @@ async def _() -> None:  # Allow using `await`
     assert_type(await async_client.simple_zmethod(1), int)
 
     base_client.simple_zproperty  # pyright: ignore[reportAttributeAccessIssue]
-    assert_type(sync_client.simple_zproperty, zyncio.Mode)
-    assert_type(await async_client.simple_zproperty(), zyncio.Mode)
+    assert_type(sync_client.simple_zproperty, zyncio.Mode | None)
+    assert_type(await async_client.simple_zproperty(), zyncio.Mode | None)
 
     base_client.settable_zproperty  # pyright: ignore[reportAttributeAccessIssue]
     assert_type(sync_client.settable_zproperty, int)
@@ -60,6 +60,10 @@ async def _() -> None:  # Allow using `await`
     base_client.user.use()  # pyright: ignore[reportCallIssue]
     assert_type(sync_client.user.use(1), int)
     assert_type(await async_client.user.use(1), int)
+
+    base_client.user.user.use()  # pyright: ignore[reportCallIssue]
+    assert_type(sync_client.user.user.use(1), int)
+    assert_type(await async_client.user.user.use(1), int)
 
     assert_type(sync_client.overloaded_method(True), SyncClient)
     assert_type(sync_client.overloaded_method(False), None)
