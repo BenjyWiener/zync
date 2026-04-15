@@ -63,8 +63,6 @@ asyncio.run(zync_sleep.run_async(3))
 @zyncio.zfunc
 async def sleep_3(zync_mode: zyncio.Mode) -> None:
     await zync_sleep.run_zync(zync_mode, 3)
-    # or
-    await zync_sleep[zync_mode](3)
 ```
 
 ### The real magic: `SyncMixin`/`AsyncMixin`, `zyncio.zmethod`, and `zyncio.zproperty`

@@ -3,7 +3,7 @@
 from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, closing, contextmanager
 from enum import Enum
-from functools import cached_property, partial, wraps
+from functools import cached_property, wraps
 import sys
 from typing import Any, Concatenate, Final, Generic, ParamSpec, Protocol, TypeAlias, TypeVar, cast, overload, runtime_checkable
 from typing_extensions import Self, TypeIs
@@ -303,13 +303,6 @@ class zfunc(_ZyncFunctionWrapper[Zyncable[P, ReturnT_co]]):
         """Run the function in async mode."""
         return await self.func(ASYNC, *args, **kwargs)
 
-    def __getitem__(self, zync_mode: Mode) -> Callable[P, Coroutine[Any, Any, ReturnT_co]]:
-        """Bind `run_zync` to the given mode.
-
-        This allows syntax like ``await f[zync_mode](...)`` instead of ``await f.run_zync(zync_mode, ...)``.
-        """
-        return partial(self.func, zync_mode)
-
 
 class zmethod(_ZyncFunctionWrapper[ZyncableMethod[T_co, P, ReturnT_co]]):
     """Wrap a method to run in both sync and async modes."""
@@ -551,13 +544,6 @@ class zcontextmanager(_ZyncFunctionWrapper[ZyncableGeneratorFunc[P, ReturnT_co, 
         async with self.cm_func(ASYNC, *args, **kwargs) as val:
             yield val
 
-    def __getitem__(self, zync_mode: Mode) -> Callable[P, AbstractAsyncContextManager[ReturnT_co]]:
-        """Bind `enter_zync` to the given mode.
-
-        This allows syntax like ``async with f[zync_mode](...)`` instead of ``async with f.enter_zync(zync_mode, ...)``.
-        """
-        return partial(self.enter_zync, zync_mode)
-
 
 class zcontextmanagermethod(_ZyncFunctionWrapper[ZyncableGeneratorMethod[T_co, P, ReturnT_co, None]]):
     """Similar to `zyncio.zcontextmanager`, but binds `self` when accessed on an instance."""
@@ -642,14 +628,6 @@ class zgenerator(_ZyncFunctionWrapper[ZyncableGeneratorFunc[P, ReturnT_co, SendT
     def run_async(self, *args: P.args, **kwargs: P.kwargs) -> AsyncGenerator[ReturnT_co, SendT_contra]:
         """Run the generator function in async mode."""
         return self.func(ASYNC, *args, **kwargs)
-
-    def __getitem__(self, zync_mode: Mode) -> Callable[P, AsyncGenerator[ReturnT_co, SendT_contra]]:
-        """Bind `run_zync` to the given mode.
-
-        This allows syntax like ``async for ... in f[zync_mode](...)`` instead of
-        ``async for ... in f.run_zync(zync_mode, ...)``.
-        """
-        return partial(self.func, zync_mode)
 
 
 class zgeneratormethod(_ZyncFunctionWrapper[ZyncableGeneratorMethod[T_co, P, ReturnT_co, SendT_contra]]):

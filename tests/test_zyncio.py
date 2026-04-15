@@ -47,7 +47,7 @@ def test_zfunc_run_zync(rand_int: int) -> None:
 
 def test_zfunc_subscript(rand_int: int) -> None:
     """Test `zfunc.__getitem__`."""
-    assert asyncio.run(_simple_zfunc[zyncio.ASYNC](rand_int)) == rand_int
+    assert asyncio.run(_simple_zfunc.run_zync(zyncio.ASYNC, rand_int)) == rand_int
 
 
 def test_invalid_zfunc() -> None:
@@ -248,7 +248,7 @@ async def context_manager(zync_mode: zyncio.Mode, x: int) -> AsyncGenerator[int]
 @zyncio.zcontextmanager
 async def nested_context_manager(zync_mode: zyncio.Mode, x: int) -> AsyncGenerator[int]:
     """Yield `x` unchanged by calling through to `context_manager`."""
-    async with context_manager[zync_mode](x) as y:
+    async with context_manager.enter_zync(zync_mode, x) as y:
         yield y
 
 
@@ -392,7 +392,7 @@ async def test_zgenerator_zync() -> None:
 async def test_zgenerator_subscript() -> None:
     """Test `zgenerator.__getitem__`."""
     numbers = random.choices(range(1, 100), k=10)
-    assert [n async for n in simple_generator[zyncio.ASYNC](*numbers)] == numbers
+    assert [n async for n in simple_generator.run_zync(zyncio.ASYNC, *numbers)] == numbers
 
 
 @zyncio.zgenerator
