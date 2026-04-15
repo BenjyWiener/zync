@@ -1,5 +1,6 @@
 """Write dual sync/async interfaces with minimal duplication."""
 
+import abc
 from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
 from contextlib import AbstractAsyncContextManager, AbstractContextManager, asynccontextmanager, closing, contextmanager
 from enum import Enum
@@ -103,6 +104,7 @@ class ZyncDelegator(Protocol[T_co]):
     and perform all operations via that "delegate" object.
     """
 
+    @abc.abstractmethod
     def __zync_delegate__(self) -> 'T_co | ZyncDelegator[T_co]': ...
 
 
