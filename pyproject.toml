@@ -5,7 +5,7 @@ description = "Write dual sync/async interfaces with minimal duplication."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-keywords = []
+keywords = ["async", "zync"]
 authors = [{ name = "Benjy Wiener", email = "benjywiener@gmail.com" }]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -17,11 +17,11 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    "Intended Audience :: Developers",
+    "Typing :: Typed",
 ]
-dependencies = ["typing_extensions~=4.0"]
 
-[project.optional-dependencies]
-dev = ["coverage", "pytest", "pytest-asyncio", "pytest-cov"]
+dependencies = ["typing_extensions~=4.0; python_version<'3.13'"]
 
 [project.urls]
 Documentation = "https://github.com/BenjyWiener/zyncio#readme"
@@ -32,12 +32,37 @@ Source = "https://github.com/BenjyWiener/zyncio"
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    { include-group = "test" },
+    { include-group = "docs" },
+]
+test = [
+    "coverage~=7.13",
+    "pytest~=9.0",
+    "pytest-asyncio~=1.3",
+    "pytest-cov~=7.0",
+]
+docs = [
+    "enum-tools[sphinx]~=0.13.0",
+    "niquests~=3.18",
+    "shibuya==2026.1.9",
+    "sphinx~=8.2",
+    "sphinx-autodoc-typehints~=3.5",
+    "sphinx-copybutton~=0.5.2",
+    "sphinx-design~=0.7.0",
+    "sphinxcontrib-trio~=1.2",
+]
+
+[tool.uv.dependency-groups.docs]
+requires-python = ">=3.14"
+
 [tool.hatch.version]
 source = "vcs"
 
 [tool.ruff]
 target-version = "py310"
-line-length = 150
+line-length = 120
 
 [tool.ruff.format]
 quote-style = "single"
@@ -58,7 +83,18 @@ extra-standard-library = ["typing_extensions"]
 
 [tool.pyright]
 reportUnnecessaryTypeIgnoreComment = "error"
+
+[[tool.pyright.executionEnvironments]]
+root = "src/zyncio"
 pythonVersion = "3.10"
+
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+pythonVersion = "3.10"
+
+[[tool.pyright.executionEnvironments]]
+root = "docs"
+pythonVersion = "3.14"
 
 [tool.coverage.run]
 source_pkgs = ["zyncio", "tests"]

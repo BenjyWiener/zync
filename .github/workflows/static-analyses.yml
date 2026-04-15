@@ -24,20 +24,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version:
-          - "3.10"
-          - "3.11"
-          - "3.12"
-          - "3.13"
-          - "3.14"
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        source-root:
+          - src/zyncio
+          - tests
+        include:
+          - source-root: tests
+            dependency-group: --group test
+          - python-version: "3.14"
+            source-root: docs
+            dependency-group: --group docs
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          version: "0.11.6"
+      - name: Set up virtual environment with Python ${{ matrix.python-version }}
+        run: uv venv --python ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -e .[dev]
+        run: uv sync ${{ matrix.dependency-group }}
       - name: Run Pyright
-        uses: jakebailey/pyright-action@v1
+        run: uvx pyright@latest --pythonpath="$(uv run which python3)" --stats ${{ matrix.source-root }}

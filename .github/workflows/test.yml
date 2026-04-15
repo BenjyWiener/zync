@@ -10,23 +10,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version:
-          - "3.10"
-          - "3.11"
-          - "3.12"
-          - "3.13"
-          - "3.14"
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          version: "0.11.6"
+      - name: Set up virtual environment with Python ${{ matrix.python-version }}
+        run: uv venv --python ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -e .[dev]
+        run: uv sync --group test
       - name: Run tests
-        run: pytest --cov --cov-report=
+        run: uv run pytest --cov --cov-report=
         env:
           COVERAGE_FILE: coverage/coverage-${{ matrix.python-version }}
       - name: Upload coverage files
@@ -42,22 +39,20 @@ jobs:
       statuses: write
     steps:
       - uses: actions/checkout@v6
-      - name: Set up Python 3.14
-        uses: actions/setup-python@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
         with:
-          python-version: "3.14"
-      - name: Install dependencies
-        run: pip install coverage
+          version: "0.11.6"
       - name: Get coverage files
         uses: actions/download-artifact@v6
         with:
           pattern: coverage-*
           path: coverage
           merge-multiple: true
-      - run: coverage combine coverage/*
+      - run: uvx coverage combine coverage/*
       - name: Create coverage status
         run: |
-          coverage="$(coverage report --format=total)"
+          coverage="$(uv run coverage report --format=total)"
           state="$([[ "$coverage" = "100.00" ]] && echo "success" || echo "failure")"
 
           curl -sS --fail-with-body -X POST \
@@ -72,4 +67,26 @@ jobs:
             "target_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           }
           EOF
-      - run: coverage report --fail-under=100
+      - run: uv run coverage report --fail-under=100
+
+  doctests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.6"
+      - name: Set up virtual environment with Python ${{ matrix.python-version }}
+        run: uv venv --python ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync --group docs
+      - name: Run doctests
+        run: cd docs && uv run make doctest
+      - name: Build docs
+        run: cd docs && uv run make html

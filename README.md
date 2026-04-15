@@ -1,18 +1,20 @@
-# ZyncIO
+![ZyncIO](docs/_static/ZyncIO.png)
 
 Write dual sync/async interfaces with minimal duplication.
 
 [![PyPI - Version](https://img.shields.io/pypi/v/zyncio.svg)](https://pypi.org/project/zyncio)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/zyncio.svg)](https://pypi.org/project/zyncio)
-[![Coverage](https://coverage-badge.samuelcolvin.workers.dev/benjywiener/zyncio.svg)](https://coverage-badge.samuelcolvin.workers.dev/redirect/benjywiener/zyncio)
+[![Coverage](https://coverage-badge.samuelcolvin.workers.dev/benjywiener/zyncio.svg)](
+    https://coverage-badge.samuelcolvin.workers.dev/redirect/benjywiener/zyncio
+)
+[![Docs](https://img.shields.io/readthedocs/zyncio.svg)](https://zyncio.readthedocs.io)
 
 ---
 
 ## What is ZyncIO?
 
-> If I had a nickel for every almost identical interface I had to write,
-> I'd have two nickels... which isn't a lot, but it's weird that I had to
-> write it twice.
+> If I had a nickel for every variation of my library that I maintain, I'd have two nickels... which isn't a lot, but
+> it's weird that I had to write everything twice.
 >
 > – Dr. Doofenshmirtz, before discovering ZyncIO.
 
@@ -109,7 +111,8 @@ class BaseClient:
     @zyncio.zmethod
     async def do_handshake(self) -> None:
         # `.z` (or `.call_zync`) on bound `zmethod`'s (and similar callables)
-        # always returns a coroutine, so you can `await` it independent of the running mode.
+        # always returns a coroutine, so you can `await` it regardless of the
+        # running mode.
         await self.send_msg.z(HANDSHAKE_REQ)
         response = await self.recv_msg.z(len(HANDSHAKE_RESP))
         if response != HANDSHAKE_RESP:

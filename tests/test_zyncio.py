@@ -4,7 +4,6 @@ import abc
 import asyncio
 from collections.abc import AsyncGenerator
 import random
-from typing import Generic
 
 import pytest
 
@@ -30,23 +29,18 @@ async def _simple_zfunc(zync_mode: zyncio.Mode, x: int) -> int:
     return x
 
 
-def test_zfunc_run_sync(rand_int: int) -> None:
+def test_zfunc_sync(rand_int: int) -> None:
     """Test `zfunc.call_sync`."""
     assert _simple_zfunc.call_sync(rand_int) == rand_int
 
 
-def test_zfunc_run_async(rand_int: int) -> None:
+def test_zfunc_async(rand_int: int) -> None:
     """Test `zfunc.call_async`."""
     assert asyncio.run(_simple_zfunc.call_async(rand_int)) == rand_int
 
 
-def test_zfunc_run_zync(rand_int: int) -> None:
+def test_zfunc_zync(rand_int: int) -> None:
     """Test `zfunc.call_zync`."""
-    assert asyncio.run(_simple_zfunc.call_zync(zyncio.ASYNC, rand_int)) == rand_int
-
-
-def test_zfunc_subscript(rand_int: int) -> None:
-    """Test `zfunc.__getitem__`."""
     assert asyncio.run(_simple_zfunc.call_zync(zyncio.ASYNC, rand_int)) == rand_int
 
 
@@ -69,7 +63,7 @@ def test_invalid_zfunc() -> None:
 def test_abstract_zmethod() -> None:
     """Test that instantiating an ABC with an abstract `zmethod`fails."""
 
-    class Abstract(Generic[zyncio.ZyncModeT_co], abc.ABC):
+    class Abstract(abc.ABC):
         @zyncio.zmethod
         @abc.abstractmethod
         async def abstract(self) -> None: ...  # pragma: no cover
@@ -369,7 +363,7 @@ async def simple_generator(zync_mode: zyncio.Mode, *args: int) -> AsyncGenerator
 
 
 def test_zgenerator_sync() -> None:
-    """Test `zgenerator.call_zync`."""
+    """Test `zgenerator.call_sync`."""
     numbers = random.choices(range(1, 100), k=10)
     assert [*simple_generator.call_sync(*numbers)] == numbers
 
@@ -384,13 +378,6 @@ async def test_zgenerator_async() -> None:
 @pytest.mark.asyncio
 async def test_zgenerator_zync() -> None:
     """Test `zgenerator.call_zync`."""
-    numbers = random.choices(range(1, 100), k=10)
-    assert [n async for n in simple_generator.call_zync(zyncio.ASYNC, *numbers)] == numbers
-
-
-@pytest.mark.asyncio
-async def test_zgenerator_subscript() -> None:
-    """Test `zgenerator.__getitem__`."""
     numbers = random.choices(range(1, 100), k=10)
     assert [n async for n in simple_generator.call_zync(zyncio.ASYNC, *numbers)] == numbers
 
@@ -445,7 +432,7 @@ async def test_nested_zgeneratormethod_async(rand_int: int) -> None:
 
 @pytest.mark.asyncio
 async def test_zgeneratormethod_zync(rand_int: int) -> None:
-    """Test `zgeneratormethod.z`."""
+    """Test `zgeneratormethod._`."""
     client = AsyncClient()
     numbers = random.choices(range(1, 100), k=10)
     assert [n async for n in client.nested_generator.z(rand_int, numbers)] == [rand_int * n for n in numbers]
@@ -531,20 +518,20 @@ async def test_zync_nested_delegate_async(rand_int: int) -> None:
 
 def test_type_guards(rand_int: int) -> None:
     """Test the `is_sync`, `is_async`, `is_sync_class`, and `is_async_class` type guards."""
-    clients: list[BaseClient] = [SyncClient(), AsyncClient()]
+    clients: list[BaseClient] = [BaseClient(), SyncClient(), AsyncClient()]
     for client in clients:
         if zyncio.is_sync(client):
             assert client.simple_zmethod(rand_int) == rand_int
         elif zyncio.is_async(client):
             assert asyncio.run(client.simple_zmethod(rand_int)) == rand_int
         else:
-            pass  # pragma: no cover
+            pass
 
-    client_classes: list[type[BaseClient]] = [SyncClient, AsyncClient]
+    client_classes: list[type[BaseClient]] = [BaseClient, SyncClient, AsyncClient]
     for client_class in client_classes:
         if zyncio.is_sync_class(client_class):
             assert client_class.class_method() is SyncClient
         elif zyncio.is_async_class(client_class):
             assert asyncio.run(client_class.class_method()) is AsyncClient
         else:
-            pass  # pragma: no cover
+            pass
